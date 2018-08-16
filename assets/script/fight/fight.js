@@ -1,6 +1,8 @@
 var default_speed = 5;
 var default_accY = -0.1;
 var default_role_height = 30;
+var default_edge_disX = 100;
+var default_edge_disY = 100;
 var default_initX = 160;
 var default_centerY = 160;
 var default_r_min = 50;
@@ -8,7 +10,7 @@ var default_r_ext = 50;
 var default_disX_min = 200;
 var default_disX_ext = 200;
 var default_disY_pre = -200;
-var default_disY_ext = 400;
+var default_disY_ext = 200;
 var default_rotate_min = 2;
 var default_rotate_ext = 3;
 
@@ -74,11 +76,12 @@ cc.Class({
         this._posY = 0;
         this._speedX = 0;
         this._speedY = 0;
-        this._standDot = null;
         this._fightX = 0;
         this._fightY = 0;
-        this._arrDots = [];
+        this._fightscale = 1;
+        this._standDot = null;
         this._idxDot = 0;
+        this._arrDots = [];
     },
 
     onLoad: function () {
@@ -87,29 +90,45 @@ cc.Class({
         this.c_spDot2.active = false;
         this.c_spDot3.active = false;
         this.c_spDot4.active = false;
-        this.firstDot();
-        this.nextDot();
-        this.nextDot();
-        this.nextDot();
+        this.initDot();
         this.doStand(0);
     },
 
-    firstDot: function() {
-        this._arrDots = [newDotInfo()];
+    cleanDots: function() {
+        var arrDots = this._arrDots;
+        for (var i in arrDots) {
+            var dot = arrDots[i];
+            if (dot.node && cc.isValid(dot.node)) {
+                dot.node.destroy();
+            }
+        }
+        this._standDot = null;
+        this._idxDot = 0;
+        this._arrDots = [];
+    },
+
+    initDot: function() {
+        this.cleanDots();
+        this._arrDots.push(newDotInfo());
     },
 
     nextDot: function() {
         var count = this._arrDots.length;
-        if (count > 0) {
+        if (count <= 0) {
+            return;
+        }
+        var need =  this._idxDot + 4;
+        for (var i = count; i < need; ++i) {
             var newDot = newDotInfo();
-            var preDot = this._arrDots[count - 1];
+            var preDot = this._arrDots[i - 1];
             newDot.x = preDot.x + default_disX_min + default_disX_ext * Math.random();
-            newDot.y = preDot.y - default_disY_pre + default_disY_ext * Math.random();
+            newDot.y = preDot.y + default_disY_pre + default_disY_ext * Math.random();
             this._arrDots.push(newDot);
         }
+        this.updateDotView();
     },
 
-    showDot(dot) {
+    createDotView(dot) {
         var node = null;
         switch(dot.id) {
             case 1: node = cc.instantiate(this.c_spDot1); break;
@@ -128,12 +147,74 @@ cc.Class({
         }
     },
 
-    doStand: function(idxDot) {
-        var dot = this._arrDots[idxDot];
-        if (dot) {
-            if (!dot.node || !cc.isValid(dot.node)) {
-                this.showDot(dot);
+    updateDotView() {
+        var len = 3;
+        var idx = this._idxDot;
+        var idxRemove = idx - len;
+        for (var i = idxRemove > len ? idxRemove - len : 0; i < idxRemove; ++i) {
+            var dot = this._arrDots[i];
+            if (dot.node) {
+                if (cc.isValid(dot.node)) {
+                    dot.node.destroy();
+                }
+                dot.node = null;
             }
+        }
+        var idxShow = idx + len;
+        for (var i = idx > len ? idx - len : 0; i < idxShow; ++i) {
+            var dot = this._arrDots[i];
+            if (!dot.node || !cc.isValid(dot.node)) {
+                this.createDotView(dot);
+            }
+        }
+    },
+
+    stopCamera: function() {
+        this.c_spFight.stopAllActions();
+        this._fightX = this.c_spFight.x;
+        this._fightY = this.c_spFight.y;
+        this._fightscale = this.c_spFight.scale;
+    },
+
+    moveCamera: function() {
+        // this.c_spFight.getNumberOfRunningActions()
+        this._fightX -= this._fightscale * this._speedX / 2;
+        this._fightY -= this._fightscale * this._speedY / 2;
+        this.c_spFight.x = this._fightX;
+        this.c_spFight.y = this._fightY;
+    },
+
+    updateCamera: function() {
+        var idxDot = this._idxDot;
+        if (idxDot < 0 || idxDot + 1 >= this._arrDots.length) {
+            return;
+        }
+        var dot0 = this._arrDots[idxDot];
+        if (!dot0 || !dot0.node || !cc.isValid(dot0.node)) {
+            return;
+        }
+        var dot1 = this._arrDots[idxDot + 1];
+        if (!dot1 || !dot1.node || !cc.isValid(dot1.node)) {
+            return;
+        }
+        var screenWidth = this.node.width;
+        var screenHeight = this.node.height;
+        var cameraWidth = Math.abs(dot1.x - dot0.x) + dot1.r + dot0.r + default_edge_disX;
+        var cameraHeight = Math.abs(dot1.y - dot0.y) + dot1.r + dot0.r + default_edge_disY;
+        var scale = (screenWidth * cameraHeight < cameraWidth * screenHeight) ? (screenWidth / cameraWidth) : (screenHeight / cameraHeight);
+        var endX = ((dot0.x - dot1.x) / 2 - dot0.x) * scale;
+        var endY = ((dot0.y - dot1.y) / 2 - dot0.y) * scale;
+        this.c_spFight.runAction(cc.spawn(cc.moveTo(0.5, endX, endY), cc.scaleTo(0.5, scale)));
+    },
+
+    doStand: function(idxDot) {
+        if (idxDot < 0 || this._arrDots.length <= idxDot) {
+            return;
+        }
+        this._idxDot = idxDot;
+        this.nextDot();
+        var dot = this._arrDots[idxDot];
+        if (dot) { 
             var rotation = getRotationByPos(this._posX - dot.x, this._posY - dot.y) - dot.node.rotation;
             var rat = rotation * Math.PI / 180;
             var posY = default_role_height + dot.r;
@@ -148,14 +229,15 @@ cc.Class({
             this._standDot = dot;
             this.c_spArrow.active = true;
         }
+        this.updateCamera();
     },
 
     doJump: function() {
+        this.stopCamera();
         var role = this.c_spRole;
         var dot = this._standDot;
         if (dot) {
             // 从星球上跳
-            var scale = dot.node.scale;
             var rotation = getRotationByPos(this._posX, this._posY) + dot.node.rotation;
             var ratRole = rotation * Math.PI / 180;
             var ratDot = dot.node.rotation * Math.PI / 180;
@@ -188,10 +270,7 @@ cc.Class({
         this.c_spRole.x = this._posX
         this.c_spRole.y = this._posY;
         this.c_spRole.rotation = getRotationByPos(this._speedX, this._speedY);
-        this._fightX -= this._speedX / 2;
-        this._fightY -= this._speedY / 2;
-        this.c_spFight.x = this._fightX;
-        this.c_spFight.y = this._fightY;
+        this.moveCamera();
     },
     
     update: function (dt) {
@@ -217,11 +296,7 @@ cc.Class({
     },
 
     btnReset: function(evt) {
-        this._idxDot = 0;
-        this._fightX = 0;
-        this._fightY = 0;
-        this.c_spFight.x = this._fightX;
-        this.c_spFight.y = this._fightY;
+        this.initDot();
         this.doStand(0);
     },
 });
